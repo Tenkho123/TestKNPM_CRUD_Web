@@ -1,94 +1,92 @@
 // web server framework
-import express from "express" 
-
+import express from "express";
 // Cross-Origin Resource Sharing
-import cors from "cors" 
+import cors from "cors";
+// Environment variables
+import dotenv from "dotenv";
+// PostgreSQL client
+import pg from "pg";
 
-// File System read write db.json
-import fs from "fs"
+dotenv.config();
 
-const app = express()
-const PORT = process.env.PORT || 3000 //Use Render’s port if available, otherwise 3000
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 // middleware
-app.use(cors()) // It’s OK for other websites to call this server
-app.use(express.json()) // enables req.body (ex: req.body = { title: "Hello" })
+app.use(cors()); 
+app.use(express.json());
 
-const DB_PATH = "./db.json"
+// Set up the Neon Database connection
+const { Pool } = pg;
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { require: true }
+});
 
-function readDB() {
-    // will use readFile later, cause lazy to write await function (❁´◡`❁)
-    // basically this mean wait until it finishes reading (same as writeFileSync)
-    // everything else will be block (if 100 user access this, backend will freeze:v)
-    // else the db will receive unfinished data from the db.json (if the data is too large in the future)
-    return JSON.parse(fs.readFileSync(DB_PATH, "utf-8"))
-}
-
-function writeDB(data) {
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2))
-}
-
-// req = request | res = response
-// READ
-app.get("/posts", (req, res) => {
-    const db = readDB()
-    res.json(db.posts) // this will response to the website that calls this api
-})
-
-// CREATE
-app.post("/posts", (req, res) => {
-    const db = readDB()
-    const newPost = {
-        id: Date.now(),
-        title: req.body.title
+// READ - Get all posts
+app.get("/posts", async (req, res) => {
+    try {
+        // SELECT everything from the posts table, ordered by ID
+        const result = await pool.query("SELECT * FROM posts ORDER BY id ASC");
+        res.json(result.rows); // result.rows contains your array of data
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to fetch posts" });
     }
-    db.posts.push(newPost)
-    writeDB(db)
-    res.json(newPost)
-})
+});
 
-// UPDATE
-app.put("/posts/:id", (req, res) => {
-    const db = readDB()
-    const id = req.params.id
-    const newTitle = req.body.title
-
-    const post = db.posts.find(p => p.id == id)
-
-    if (!post) {
-        return res.status(404).json({ error: "Post not found" })
+// CREATE - Add a new post
+app.post("/posts", async (req, res) => {
+    try {
+        const { title } = req.body;
+        // $1 is a placeholder for the title to protect against SQL injection
+        // RETURNING * sends back the newly created row (including its auto-generated ID)
+        const result = await pool.query(
+            "INSERT INTO posts (title) VALUES ($1) RETURNING *", 
+            [title]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to create post" });
     }
+});
 
-    post.title = newTitle
-    writeDB(db)
+// UPDATE - Change a post's title
+app.put("/posts/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title } = req.body;
+        
+        const result = await pool.query(
+            "UPDATE posts SET title = $1 WHERE id = $2 RETURNING *",
+            [title, id]
+        );
 
-    res.json(post)
-})
+        // If rowCount is 0, it means no post matched that ID
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: "Post not found" });
+        }
 
-// DELETE
-app.delete("/posts/:id", (req, res) => {
-    const db = readDB()
-    db.posts = db.posts.filter(p => p.id != req.params.id)
-    writeDB(db)
-    res.json({ success: true })
-})
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to update post" });
+    }
+});
+
+// DELETE - Remove a post
+app.delete("/posts/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query("DELETE FROM posts WHERE id = $1", [id]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to delete post" });
+    }
+});
 
 app.listen(PORT, () => {
-    console.log("Server running on port", PORT)
-})
-
-// Later use this instead:
-
-// async function readDB() {
-//     const data = await fs.readFile(DB_PATH, "utf-8")
-//     return JSON.parse(data)
-// }
-
-// async function writeDB(data) {
-//     await fs.writeFile(DB_PATH, JSON.stringify(data, null, 2))
-// }
-
-// app.get("/posts", async (req, res) => {
-//     const db = await readDB()
-//     res.json(db.posts)
-// })
+    console.log("🚀 Server running on port", PORT);
+});
