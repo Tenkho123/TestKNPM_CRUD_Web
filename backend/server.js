@@ -13,14 +13,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // middleware
-app.use(cors()); 
+app.use(cors({
+    origin: "https://tenkho123.github.io/KNPM_Group11/"
+}));
 app.use(express.json());
 
 // Set up the Neon Database connection
 const { Pool } = pg;
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { require: true }
+    ssl: true // Neon requires SSL connections
 });
 
 // READ - Get all posts
